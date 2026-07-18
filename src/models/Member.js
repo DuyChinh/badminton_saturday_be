@@ -26,6 +26,10 @@ const MemberSchema = new mongoose.Schema({
   weekLabel: {
     type: String,
     default: ''
+  },
+  note: {
+    type: String,
+    default: ''
   }
 }, {
   timestamps: true

@@ -40,7 +40,7 @@ const memberController = {
    */
   create: async (req, res) => {
     try {
-      const { name, memberCode } = req.body;
+      const { name, memberCode, amountDue, note } = req.body;
 
       if (!name || !name.trim()) {
         return res.status(400).json({ message: 'Tên thành viên là bắt buộc' });
@@ -55,11 +55,14 @@ const memberController = {
         return res.status(400).json({ message: `Mã thành viên "${code}" đã tồn tại` });
       }
 
+      const initialAmount = amountDue !== undefined ? Number(amountDue) : 0;
+      
       const member = await Member.create({
         name: name.trim(),
         memberCode: code,
-        amountDue: 0,
-        paymentStatus: 'paid'
+        amountDue: initialAmount,
+        paymentStatus: initialAmount > 0 ? 'unpaid' : 'paid',
+        note: note || ''
       });
 
       res.status(201).json({ success: true, data: member });
@@ -79,7 +82,7 @@ const memberController = {
    */
   update: async (req, res) => {
     try {
-      const { name, amountDue, paymentStatus, weekLabel, memberCode } = req.body;
+      const { name, amountDue, paymentStatus, weekLabel, memberCode, note } = req.body;
       const member = await Member.findById(req.params.id);
 
       if (!member) {
@@ -125,6 +128,10 @@ const memberController = {
 
       if (weekLabel) {
         member.weekLabel = weekLabel;
+      }
+
+      if (note !== undefined) {
+        member.note = note;
       }
 
       await member.save();
