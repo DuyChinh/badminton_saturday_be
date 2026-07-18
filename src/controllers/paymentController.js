@@ -85,6 +85,15 @@ const paymentController = {
     try {
       const data = req.body;
 
+      // Xác thực API Key từ SePay
+      const authHeader = req.headers['authorization'];
+      const apiKey = config.SEPAY.apiKey;
+
+      if (apiKey && (!authHeader || !authHeader.includes(apiKey))) {
+        console.warn('⚠️ SePay Webhook: Unauthorized. API Key mismatch.');
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+      }
+
       console.log('📥 SePay Webhook received:', JSON.stringify(data, null, 2));
 
       const {
