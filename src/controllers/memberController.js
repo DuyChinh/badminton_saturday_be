@@ -189,22 +189,45 @@ const memberController = {
    */
   bulkUpdate: async (req, res) => {
     try {
-      const { amountDue, weekLabel } = req.body;
+      const { amountDue, weekLabel, isAdd } = req.body;
 
       if (amountDue === undefined) {
         return res.status(400).json({ message: 'Số tiền là bắt buộc' });
       }
 
-      const updateData = {
-        amountDue: Number(amountDue),
-        paymentStatus: Number(amountDue) > 0 ? 'unpaid' : 'paid'
-      };
-
-      if (weekLabel) {
-        updateData.weekLabel = weekLabel;
+      let filter = {};
+      if (req.body.memberIds && Array.isArray(req.body.memberIds) && req.body.memberIds.length > 0) {
+        filter = { _id: { $in: req.body.memberIds } };
       }
 
-      const result = await Member.updateMany({}, updateData);
+      let updateOp;
+      if (isAdd) {
+        updateOp = [
+          {
+            $set: {
+              amountDue: { $add: ["$amountDue", Number(amountDue)] },
+              ...(weekLabel ? { weekLabel: weekLabel } : {})
+            }
+          },
+          {
+            $set: {
+              paymentStatus: {
+                $cond: { if: { $gt: ["$amountDue", 0] }, then: 'unpaid', else: 'paid' }
+              }
+            }
+          }
+        ];
+      } else {
+        updateOp = {
+          amountDue: Number(amountDue),
+          paymentStatus: Number(amountDue) > 0 ? 'unpaid' : 'paid'
+        };
+        if (weekLabel) {
+          updateOp.weekLabel = weekLabel;
+        }
+      }
+
+      const result = await Member.updateMany(filter, updateOp);
 
       res.status(200).json({
         success: true,
