@@ -27,7 +27,7 @@ const authController = {
       }
 
       const token = jwt.sign(
-        { id: admin._id, username: admin.username },
+        { id: admin._id, username: admin.username, role: 'admin' },
         config.JWT_SECRET,
         { expiresIn: config.JWT_EXPIRES }
       );

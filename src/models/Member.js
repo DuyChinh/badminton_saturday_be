@@ -30,6 +30,28 @@ const MemberSchema = new mongoose.Schema({
   note: {
     type: String,
     default: ''
+  },
+  username: {
+    type: String,
+    unique: true,
+    sparse: true,
+    trim: true,
+    lowercase: true
+  },
+  password: {
+    type: String
+  },
+  isFirstLogin: {
+    type: Boolean,
+    default: true
+  },
+  avatarUrl: {
+    type: String,
+    default: ''
+  },
+  avatarPublicId: {
+    type: String,
+    default: ''
   }
 }, {
   timestamps: true

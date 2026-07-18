@@ -207,17 +207,60 @@ const paymentController = {
    */
   getTransactions: async (req, res) => {
     try {
-      const { page = 1, limit = 50 } = req.query;
+      const { page = 1, limit = 50, month, year, search } = req.query;
       const skip = (parseInt(page) - 1) * parseInt(limit);
 
-      const [transactions, total] = await Promise.all([
-        Transaction.find()
-          .populate('memberId', 'name memberCode')
+      let query = {};
+
+      // If requested by a normal user, restrict to their own transactions
+      if (req.user && req.user.role === 'user') {
+        query.memberId = req.user.id;
+      }
+
+      if (month && year) {
+        const startDate = new Date(year, parseInt(month) - 1, 1);
+        const endDate = new Date(year, parseInt(month), 0, 23, 59, 59, 999);
+        query.createdAt = {
+          $gte: startDate,
+          $lte: endDate
+        };
+      } else if (year) {
+        const startDate = new Date(year, 0, 1);
+        const endDate = new Date(year, 11, 31, 23, 59, 59, 999);
+        query.createdAt = {
+          $gte: startDate,
+          $lte: endDate
+        };
+      }
+
+      if (search) {
+        const members = await Member.find({
+          $or: [
+            { name: { $regex: search, $options: 'i' } },
+            { memberCode: { $regex: search, $options: 'i' } }
+          ]
+        }).select('_id');
+        
+        const memberIds = members.map(m => m._id);
+        
+        if (memberIds.length > 0) {
+          query.memberId = { $in: memberIds };
+        } else {
+          query.transactionContent = { $regex: search, $options: 'i' };
+        }
+      }
+
+      const [transactions, total, allTx] = await Promise.all([
+        Transaction.find(query)
+          .populate('memberId', 'name memberCode avatarUrl')
           .sort({ createdAt: -1 })
           .skip(skip)
           .limit(parseInt(limit)),
-        Transaction.countDocuments()
+        Transaction.countDocuments(query),
+        Transaction.find(query).select('amount')
       ]);
+
+      const totalAmount = allTx.reduce((sum, tx) => sum + tx.amount, 0);
 
       res.status(200).json({
         success: true,
@@ -227,6 +270,9 @@ const paymentController = {
           page: parseInt(page),
           limit: parseInt(limit),
           totalPages: Math.ceil(total / parseInt(limit))
+        },
+        summary: {
+          totalAmount
         }
       });
     } catch (error) {

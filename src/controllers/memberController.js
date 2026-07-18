@@ -1,5 +1,6 @@
 const Member = require('../models/Member');
 const { generateMemberCode } = require('../utils/helpers');
+const bcrypt = require('bcryptjs');
 
 const memberController = {
   /**
@@ -40,7 +41,7 @@ const memberController = {
    */
   create: async (req, res) => {
     try {
-      const { name, memberCode, amountDue, note } = req.body;
+      const { name, memberCode, amountDue, note, username, password } = req.body;
 
       if (!name || !name.trim()) {
         return res.status(400).json({ message: 'Tên thành viên là bắt buộc' });
@@ -55,6 +56,23 @@ const memberController = {
         return res.status(400).json({ message: `Mã thành viên "${code}" đã tồn tại` });
       }
 
+      // Username checking
+      let hashedPw = undefined;
+      let finalUsername = undefined;
+
+      if (username) {
+        finalUsername = username.toLowerCase();
+        const existingUser = await Member.findOne({ username: finalUsername });
+        if (existingUser) {
+          return res.status(400).json({ message: 'Tên đăng nhập đã tồn tại' });
+        }
+      }
+
+      if (password) {
+        const salt = await bcrypt.genSalt(10);
+        hashedPw = await bcrypt.hash(password, salt);
+      }
+
       const initialAmount = amountDue !== undefined ? Number(amountDue) : 0;
       
       const member = await Member.create({
@@ -62,7 +80,9 @@ const memberController = {
         memberCode: code,
         amountDue: initialAmount,
         paymentStatus: initialAmount > 0 ? 'unpaid' : 'paid',
-        note: note || ''
+        note: note || '',
+        username: finalUsername,
+        password: hashedPw
       });
 
       res.status(201).json({ success: true, data: member });
@@ -82,7 +102,7 @@ const memberController = {
    */
   update: async (req, res) => {
     try {
-      const { name, amountDue, paymentStatus, weekLabel, memberCode, note } = req.body;
+      const { name, amountDue, paymentStatus, weekLabel, memberCode, note, username, password } = req.body;
       const member = await Member.findById(req.params.id);
 
       if (!member) {
@@ -132,6 +152,26 @@ const memberController = {
 
       if (note !== undefined) {
         member.note = note;
+      }
+
+      // Handle username update
+      if (username !== undefined) {
+        if (username === '') {
+          member.username = undefined; // Or leave it alone, but if admin explicitly clears it?
+        } else {
+          const finalUsername = username.toLowerCase();
+          const existingUser = await Member.findOne({ username: finalUsername, _id: { $ne: member._id } });
+          if (existingUser) {
+            return res.status(400).json({ message: 'Tên đăng nhập đã tồn tại' });
+          }
+          member.username = finalUsername;
+        }
+      }
+
+      // Handle password update
+      if (password) {
+        const salt = await bcrypt.genSalt(10);
+        member.password = await bcrypt.hash(password, salt);
       }
 
       await member.save();

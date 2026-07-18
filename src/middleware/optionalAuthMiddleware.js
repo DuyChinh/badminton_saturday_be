@@ -1,16 +1,16 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 
-const authMiddleware = (req, res, next) => {
+const optionalAuthMiddleware = (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
-      return res.status(401).json({ message: 'Authorization header is required' });
+      return next();
     }
 
     const parts = authHeader.split(' ');
     if (parts.length !== 2 || parts[0] !== 'Bearer') {
-      return res.status(401).json({ message: 'Invalid authorization format. Use: Bearer <token>' });
+      return next();
     }
 
     const token = parts[1];
@@ -33,8 +33,9 @@ const authMiddleware = (req, res, next) => {
 
     next();
   } catch (error) {
-    return res.status(401).json({ message: 'Invalid or expired token' });
+    // If token is invalid, just proceed as anonymous
+    next();
   }
 };
 
-module.exports = authMiddleware;
+module.exports = optionalAuthMiddleware;
