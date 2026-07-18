@@ -175,6 +175,49 @@ const postController = {
       console.error('Delete post error:', error);
       res.status(500).json({ message: 'Lỗi server khi xóa bài' });
     }
+  },
+
+  // POST /api/posts/:id/react
+  reactToPost: async (req, res) => {
+    try {
+      const postId = req.params.id;
+      const { type, guestId } = req.body;
+      const userId = req.user ? req.user.id : null;
+
+      if (!userId && !guestId) {
+        return res.status(400).json({ message: 'Missing user or guest identity' });
+      }
+
+      const post = await Post.findById(postId);
+      if (!post) {
+        return res.status(404).json({ message: 'Không tìm thấy bài viết' });
+      }
+
+      const existingReactionIndex = post.reactions.findIndex(r => 
+        (userId && r.user && r.user.toString() === userId) ||
+        (guestId && r.guestId === guestId)
+      );
+
+      if (type) {
+        if (existingReactionIndex > -1) {
+          post.reactions[existingReactionIndex].type = type;
+        } else {
+          post.reactions.push(userId ? { user: userId, type } : { guestId, type });
+        }
+      } else {
+        if (existingReactionIndex > -1) {
+          post.reactions.splice(existingReactionIndex, 1);
+        }
+      }
+
+      await post.save();
+      await post.populate('reactions.user', 'name');
+
+      res.status(200).json({ success: true, data: post });
+    } catch (error) {
+      console.error('React post error:', error);
+      res.status(500).json({ message: 'Lỗi server' });
+    }
   }
 };
 

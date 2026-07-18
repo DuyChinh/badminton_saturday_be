@@ -15,7 +15,12 @@ const postSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Member',
     required: true
-  }
+  },
+  reactions: [{
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'Member' },
+    guestId: { type: String },
+    type: { type: String, enum: ['like', 'love', 'haha', 'wow', 'sad', 'angry'], required: true }
+  }]
 }, { timestamps: true });
 
 module.exports = mongoose.model('Post', postSchema);

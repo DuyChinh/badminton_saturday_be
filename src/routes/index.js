@@ -9,6 +9,8 @@ const configureRoutes = (app) => {
   api.use('/payments', require('./payments'));
   api.use('/users', require('./userRoutes'));
   api.use('/posts', require('./postRoutes'));
+  api.use('/comments', require('./comments'));
+  api.use('/fee-config', require('./feeConfigRoutes'));
 
   // 404 handler for API routes
   api.use((req, res) => {
