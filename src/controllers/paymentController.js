@@ -23,9 +23,9 @@ const paymentController = {
       const day = String(now.getDate()).padStart(2, '0');
       const month = String(now.getMonth() + 1).padStart(2, '0');
       const year = now.getFullYear();
-      const dateStr = `${day}/${month}/${year}`;
+      const dateStr = `${day}${month}${year}`;
 
-      const transferDescription = `CAULONG ${member.memberCode} chuyen tien cau ngay ${dateStr}`;
+      const transferDescription = `CAULONG ${member.memberCode} ${dateStr}`;
 
       // Build VietQR URL
       const bankCode = config.SEPAY.bankCode;
@@ -122,14 +122,54 @@ const paymentController = {
       }
 
       // Extract memberCode from content using regex
-      // Pattern: "CAULONG MEMBERCODE ..."
-      const match = content ? content.match(/CAULONG\s+([A-Za-z0-9]+)/i) : null;
+      // Pattern: "CAULONG MEMBERCODE ..." allowing optional spaces and underscores
+      const match = content ? content.match(/CAULONG\s*([A-Za-z0-9_]+)/i) : null;
 
-      if (!match) {
-        console.log('⚠️ No CAULONG pattern found in content:', content);
-        // Still log the transaction as unmatched
+      let member = null;
+      let memberCode = '';
+
+      if (match) {
+        memberCode = match[1].toUpperCase();
+        console.log('🔍 Extracted memberCode:', memberCode);
+
+        // 1. Try exact match first
+        member = await Member.findOne({ memberCode });
+
+        // 2. Fuzzy matching if exact match fails
+        if (!member) {
+          const allMembers = await Member.find({});
+          
+          // Normalize function: remove underscores and spaces, uppercase
+          const normalize = (str) => str.replace(/[_ ]/g, '').toUpperCase();
+          const normalizedExtracted = normalize(memberCode);
+
+          // Try to find exact match on normalized codes
+          let matchedMembers = allMembers.filter(m => normalize(m.memberCode) === normalizedExtracted);
+
+          // If still no match, try prefix matching (in case of truncation)
+          if (matchedMembers.length === 0) {
+            matchedMembers = allMembers.filter(m => {
+              const normDB = normalize(m.memberCode);
+              // extracted is a prefix of DB, or DB is a prefix of extracted
+              return normDB.startsWith(normalizedExtracted) || normalizedExtracted.startsWith(normDB);
+            });
+          }
+
+          if (matchedMembers.length === 1) {
+            member = matchedMembers[0];
+            console.log(`✅ Fuzzy matched ${memberCode} to ${member.memberCode}`);
+            // Use the real member code from DB for logging
+            memberCode = member.memberCode; 
+          } else if (matchedMembers.length > 1) {
+            console.log(`⚠️ Multiple fuzzy matches found for ${memberCode}, cannot determine exact member.`);
+          }
+        }
+      }
+
+      if (!member) {
+        console.log('⚠️ No matching member found for content:', content);
         await Transaction.create({
-          memberCode: '',
+          memberCode: memberCode || '',
           amount: transferAmount,
           transactionContent: content || '',
           sepayTransactionId: String(sepayId || ''),
@@ -138,28 +178,7 @@ const paymentController = {
           referenceCode: referenceCode || '',
           status: 'unmatched'
         });
-        return res.status(200).json({ success: true, message: 'No matching content' });
-      }
-
-      const memberCode = match[1].toUpperCase();
-      console.log('🔍 Extracted memberCode:', memberCode);
-
-      // Find member by memberCode
-      const member = await Member.findOne({ memberCode });
-
-      if (!member) {
-        console.log('⚠️ Member not found for code:', memberCode);
-        await Transaction.create({
-          memberCode,
-          amount: transferAmount,
-          transactionContent: content,
-          sepayTransactionId: String(sepayId || ''),
-          gateway: gateway || '',
-          transactionDate: transactionDate || '',
-          referenceCode: referenceCode || '',
-          status: 'unmatched'
-        });
-        return res.status(200).json({ success: true, message: 'Member not found' });
+        return res.status(200).json({ success: true, message: 'No matching content or member' });
       }
 
       // Check if payment amount is sufficient
