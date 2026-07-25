@@ -15,7 +15,7 @@ const commentController = {
       const { postId } = req.params;
       const comments = await Comment.find({ post: postId })
         .populate('author', 'name username avatarUrl')
-        .populate('reactions.user', 'name') // in case we want to show who reacted
+        .populate('reactions.user', 'name avatarUrl memberCode')
         .sort({ createdAt: 1 }); // Oldest first to build thread correctly
       
       res.status(200).json({ success: true, data: comments });
@@ -82,7 +82,7 @@ const commentController = {
   reactToComment: async (req, res) => {
     try {
       const { commentId } = req.params;
-      const { type, guestId } = req.body; // 'like', 'love', etc.
+      const { type, guestId, guestName } = req.body;
       const userId = req.user ? req.user.id : null;
 
       if (!userId && !guestId) {
@@ -104,8 +104,9 @@ const commentController = {
         // Add or update reaction
         if (existingReactionIndex > -1) {
           comment.reactions[existingReactionIndex].type = type;
+          if (guestName) comment.reactions[existingReactionIndex].guestName = guestName;
         } else {
-          comment.reactions.push(userId ? { user: userId, type } : { guestId, type });
+          comment.reactions.push(userId ? { user: userId, type } : { guestId, guestName, type });
         }
       } else {
         // Remove reaction if type is empty/null
@@ -115,7 +116,8 @@ const commentController = {
       }
 
       await comment.save();
-      await comment.populate('reactions.user', 'name');
+      await comment.populate('author', 'name username avatarUrl');
+      await comment.populate('reactions.user', 'name avatarUrl memberCode');
 
       res.status(200).json({ success: true, data: comment });
     } catch (error) {

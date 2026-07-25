@@ -109,6 +109,18 @@ const memberController = {
         return res.status(404).json({ message: 'Không tìm thấy thành viên' });
       }
 
+      // Check permission: Admin or Self
+      const isSelf = req.user && (req.user.id === member._id.toString());
+      const isAdmin = req.user && req.user.role === 'admin';
+
+      if (!isAdmin && !isSelf) {
+        return res.status(403).json({ message: 'Bạn không có quyền chỉnh sửa thông tin của thành viên này' });
+      }
+
+      if (!isAdmin && (amountDue !== undefined || paymentStatus !== undefined || weekLabel !== undefined)) {
+        return res.status(403).json({ message: 'Chỉ Admin mới có quyền cập nhật thông tin tài chính' });
+      }
+
       // Update name and regenerate memberCode if name changed
       if (name && name.trim()) {
         member.name = name.trim();

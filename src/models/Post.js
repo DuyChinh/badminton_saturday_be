@@ -19,6 +19,7 @@ const postSchema = new mongoose.Schema({
   reactions: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'Member' },
     guestId: { type: String },
+    guestName: { type: String },
     type: { type: String, enum: ['like', 'love', 'haha', 'wow', 'sad', 'angry'], required: true }
   }]
 }, { timestamps: true });

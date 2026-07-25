@@ -32,6 +32,7 @@ const commentSchema = new mongoose.Schema({
       required: false
     },
     guestId: { type: String },
+    guestName: { type: String },
     type: {
       type: String,
       enum: ['like', 'love', 'haha', 'wow', 'sad', 'angry'],

@@ -15,6 +15,7 @@ const postController = {
 
       const posts = await Post.find(filter)
         .populate('author', 'name avatarUrl username role')
+        .populate('reactions.user', 'name avatarUrl memberCode')
         .sort({ createdAt: sortOrder });
 
       res.status(200).json({ success: true, data: posts });
@@ -181,7 +182,7 @@ const postController = {
   reactToPost: async (req, res) => {
     try {
       const postId = req.params.id;
-      const { type, guestId } = req.body;
+      const { type, guestId, guestName } = req.body;
       const userId = req.user ? req.user.id : null;
 
       if (!userId && !guestId) {
@@ -201,8 +202,9 @@ const postController = {
       if (type) {
         if (existingReactionIndex > -1) {
           post.reactions[existingReactionIndex].type = type;
+          if (guestName) post.reactions[existingReactionIndex].guestName = guestName;
         } else {
-          post.reactions.push(userId ? { user: userId, type } : { guestId, type });
+          post.reactions.push(userId ? { user: userId, type } : { guestId, guestName, type });
         }
       } else {
         if (existingReactionIndex > -1) {
@@ -211,7 +213,8 @@ const postController = {
       }
 
       await post.save();
-      await post.populate('reactions.user', 'name');
+      await post.populate('author', 'name avatarUrl username role');
+      await post.populate('reactions.user', 'name avatarUrl memberCode');
 
       res.status(200).json({ success: true, data: post });
     } catch (error) {
