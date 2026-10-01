@@ -52,6 +52,13 @@ const MemberSchema = new mongoose.Schema({
   avatarPublicId: {
     type: String,
     default: ''
+  },
+  spinCount: {
+    type: Number,
+    default: 0
+  },
+  lastSpinDate: {
+    type: Date
   }
 }, {
   timestamps: true

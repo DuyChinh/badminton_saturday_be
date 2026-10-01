@@ -1,6 +1,128 @@
 const Member = require('../models/Member');
 const Transaction = require('../models/Transaction');
+const SpinHistory = require('../models/SpinHistory');
 const config = require('../config');
+
+/**
+ * Lucky wheel.
+ *
+ * The draw happens here, never in the browser, so the odds cannot be rewritten
+ * from the console. A win has to be written to `member.amountDue`: the SePay
+ * webhook settles a member only when `transferAmount >= member.amountDue`, so a
+ * discount that lived only in the UI would make every winner look like they had
+ * underpaid and nobody would ever be marked as paid.
+ *
+ * No voucher is stored. The pre-spin amount is kept in memory only, purely so
+ * "tôi không muốn dùng may mắn" can put it back; a server restart simply drops
+ * the undo and leaves the member with the discount they already won.
+ *
+ * `odds: null` means "whatever probability is left over".
+ */
+const LUCKY_PRIZES = [
+  { id: 'cash1', label: '10.000đ', short: '10K', kind: 'cash', value: 10000, odds: 1 / 50 },
+  { id: 'cash2', label: '2.000đ', short: '2K', kind: 'cash', value: 2000, odds: 1 / 5 },
+  { id: 'cash3', label: '15.000đ', short: '15K', kind: 'cash', value: 15000, odds: 1 / 70 },
+  { id: 'cash4', label: '4.000đ', short: '4K', kind: 'cash', value: 4000, odds: 1 / 20 },
+  { id: 'cash5', label: '5.000đ', short: '5K', kind: 'cash', value: 5000, odds: 1 / 25 },
+  { id: 'half', label: 'Giảm 50%', short: '50%', kind: 'percent', value: 50, odds: 1 / 50 },
+  { id: 'none', label: 'Chúc bạn may mắn lần sau', short: 'Lần sau', kind: 'none', value: 0, odds: null }
+];
+
+/** Never discount a bill down to zero — VietQR needs a payable amount. */
+const MIN_REMAINING = 1000;
+
+/** The half-price slice is only in play on small bills. */
+const HALF_MAX_AMOUNT = 40000;
+
+const isEligible = (prize, amountDue) => prize.id !== 'half' || amountDue <= HALF_MAX_AMOUNT;
+
+/** memberId -> { originalAmountDue, discountedTo, prizeId, discount } */
+const activeDraws = new Map();
+
+/**
+ * Odds for one particular bill. A prize the bill is not eligible for drops to
+ * zero and its share falls through to "chúc bạn may mắn lần sau".
+ */
+const prizeOdds = (amountDue) => {
+  const fixed = LUCKY_PRIZES.reduce(
+    (sum, p) => sum + (p.odds && isEligible(p, amountDue) ? p.odds : 0),
+    0
+  );
+  return LUCKY_PRIZES.map((p) => ({
+    ...p,
+    eligible: isEligible(p, amountDue),
+    odds: p.odds === null ? Math.max(0, 1 - fixed) : isEligible(p, amountDue) ? p.odds : 0
+  }));
+};
+
+const drawPrize = (amountDue) => {
+  const table = prizeOdds(amountDue);
+  const total = table.reduce((sum, p) => sum + p.odds, 0);
+  let roll = Math.random() * total;
+  for (const prize of table) {
+    roll -= prize.odds;
+    if (roll <= 0) return prize;
+  }
+  return table[table.length - 1];
+};
+
+const discountFor = (prize, amountDue) => {
+  if (prize.kind === 'none') return 0;
+  const raw =
+    prize.kind === 'percent'
+      ? Math.round((amountDue * prize.value) / 100 / 1000) * 1000
+      : prize.value;
+  return Math.max(0, Math.min(raw, amountDue - MIN_REMAINING));
+};
+
+const buildPayment = (member) => {
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const dateStr = `${day}${month}${now.getFullYear()}`;
+  const transferDescription = `CAULONG ${member.memberCode} ${dateStr}`;
+
+  const bankCode = config.SEPAY.bankCode;
+  const bankAccount = config.SEPAY.bankAccount;
+  const amount = member.amountDue;
+
+  return {
+    bankCode,
+    bankAccount,
+    bankName: config.SEPAY.bankName,
+    accountName: config.SEPAY.accountName,
+    amount,
+    transferDescription,
+    qrUrl:
+      `https://img.vietqr.io/image/${bankCode}-${bankAccount}-compact2.png` +
+      `?amount=${amount}&addInfo=${encodeURIComponent(transferDescription)}` +
+      `&accountName=${encodeURIComponent(config.SEPAY.accountName)}`
+  };
+};
+
+const publicPrizes = (amountDue) =>
+  prizeOdds(amountDue).map(({ id, label, short, kind, value, odds, eligible }) => ({
+    id,
+    label,
+    short,
+    kind,
+    value,
+    odds,
+    eligible
+  }));
+
+const isSameWeek = (date1, date2) => {
+  if (!date1 || !date2) return false;
+  const d1 = new Date(date1);
+  const d2 = new Date(date2);
+  const getMonday = (d) => {
+    const day = d.getDay() || 7;
+    if (day !== 1) d.setHours(-24 * (day - 1));
+    d.setHours(0,0,0,0);
+    return d.getTime();
+  };
+  return getMonday(d1) === getMonday(d2);
+};
 
 const paymentController = {
   /**
@@ -18,22 +140,8 @@ const paymentController = {
         return res.status(400).json({ message: 'Thành viên này đã thanh toán' });
       }
 
-      // Build transfer description
-      const now = new Date();
-      const day = String(now.getDate()).padStart(2, '0');
-      const month = String(now.getMonth() + 1).padStart(2, '0');
-      const year = now.getFullYear();
-      const dateStr = `${day}${month}${year}`;
-
-      const transferDescription = `CAULONG ${member.memberCode} ${dateStr}`;
-
-      // Build VietQR URL
-      const bankCode = config.SEPAY.bankCode;
-      const bankAccount = config.SEPAY.bankAccount;
-      const amount = member.amountDue;
-      const encodedDescription = encodeURIComponent(transferDescription);
-
-      const qrUrl = `https://img.vietqr.io/image/${bankCode}-${bankAccount}-compact2.png?amount=${amount}&addInfo=${encodedDescription}&accountName=${encodeURIComponent(config.SEPAY.accountName)}`;
+      const draw = activeDraws.get(String(member._id));
+      const baseAmount = draw?.originalAmountDue || member.amountDue;
 
       res.status(200).json({
         success: true,
@@ -44,19 +152,159 @@ const paymentController = {
             memberCode: member.memberCode,
             amountDue: member.amountDue
           },
-          payment: {
-            bankCode,
-            bankAccount,
-            bankName: config.SEPAY.bankName,
-            accountName: config.SEPAY.accountName,
-            amount,
-            transferDescription,
-            qrUrl
+          payment: buildPayment(member),
+          lucky: {
+            prizes: publicPrizes(baseAmount),
+            halfMaxAmount: HALF_MAX_AMOUNT,
+            spun: Boolean(draw),
+            cancelled: Boolean(draw && draw.cancelled),
+            result:
+              draw && !draw.cancelled
+                ? { prizeId: draw.prizeId, discount: draw.discount, originalAmountDue: draw.originalAmountDue }
+                : null
           }
         }
       });
     } catch (error) {
       console.error('Get QR info error:', error);
+      res.status(500).json({ message: 'Lỗi server' });
+    }
+  },
+
+  /**
+   * POST /api/payments/lucky-spin/:memberId
+   * Public - Quay vòng may mắn (chế độ test: mở quay vô hạn lượt).
+   */
+  luckySpin: async (req, res) => {
+    try {
+      const member = await Member.findById(req.params.memberId);
+      if (!member) {
+        return res.status(404).json({ message: 'Không tìm thấy thành viên' });
+      }
+      if (member.paymentStatus === 'paid' || member.amountDue <= 0) {
+        return res.status(400).json({ message: 'Thành viên này đã thanh toán' });
+      }
+
+      const key = String(member._id);
+
+      const now = new Date();
+      if (!member.lastSpinDate || !isSameWeek(member.lastSpinDate, now)) {
+        member.spinCount = 0;
+      }
+
+      if (member.spinCount >= 2) {
+        return res.status(200).json({
+          success: true,
+          data: {
+            outOfTurns: true
+          }
+        });
+      }
+
+      member.spinCount += 1;
+      member.lastSpinDate = now;
+
+      // Giữ nguyên số tiền gốc (originalAmountDue) để tính toán giải thưởng mới mỗi lần quay
+      const existing = activeDraws.get(key);
+      const originalAmountDue = existing?.originalAmountDue || member.amountDue;
+
+      if (originalAmountDue > 150000) {
+        // Rollback spin count if they can't actually spin
+        member.spinCount -= 1;
+        return res.status(200).json({
+          success: true,
+          data: {
+            amountTooHigh: true
+          }
+        });
+      }
+
+      const prize = drawPrize(originalAmountDue);
+      const discount = discountFor(prize, originalAmountDue);
+
+      member.amountDue = Math.max(MIN_REMAINING, originalAmountDue - discount);
+      await member.save();
+
+      const history = await SpinHistory.create({
+        memberId: member._id,
+        memberName: member.name,
+        memberCode: member.memberCode,
+        prizeId: prize.id,
+        prizeLabel: prize.label,
+        discount
+      });
+
+      activeDraws.set(key, {
+        prizeId: prize.id,
+        discount,
+        originalAmountDue,
+        discountedTo: member.amountDue,
+        cancelled: false,
+        historyId: history._id
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          prizeId: prize.id,
+          prizeLabel: prize.label,
+          discount,
+          originalAmountDue,
+          member: { id: member._id, amountDue: member.amountDue },
+          payment: buildPayment(member)
+        }
+      });
+    } catch (error) {
+      console.error('Lucky spin error:', error);
+      res.status(500).json({ message: 'Lỗi server' });
+    }
+  },
+
+  /**
+   * POST /api/payments/lucky-cancel/:memberId
+   * Public - Bỏ kết quả vòng quay, trả lại số tiền ban đầu.
+   */
+  luckyCancel: async (req, res) => {
+    try {
+      const member = await Member.findById(req.params.memberId);
+      if (!member) {
+        return res.status(404).json({ message: 'Không tìm thấy thành viên' });
+      }
+
+      const key = String(member._id);
+      const draw = activeDraws.get(key);
+      if (!draw) {
+        return res.status(400).json({ message: 'Chưa có kết quả quay nào để hoàn lại' });
+      }
+
+      if (draw.cancelled) {
+        return res.status(400).json({ message: 'Kết quả quay đã được hoàn lại rồi' });
+      }
+
+      // If an admin edited the amount after the spin, their value wins —
+      // restoring the stale original would silently undo their change.
+      if (draw.discount > 0 && member.amountDue === draw.discountedTo) {
+        member.amountDue = draw.originalAmountDue;
+        await member.save();
+      }
+      
+      if (draw.historyId) {
+        await SpinHistory.findByIdAndUpdate(draw.historyId, { status: 'cancelled' });
+      }
+      
+      // Kept rather than deleted, so the spin stays used up.
+      activeDraws.set(key, { ...draw, cancelled: true });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          cancelled: true,
+          member: { id: member._id, amountDue: member.amountDue },
+          payment: buildPayment(member)
+        }
+      });
+    } catch (error) {
+      console.error('Lucky cancel error:', error);
       res.status(500).json({ message: 'Lỗi server' });
     }
   },
@@ -203,6 +451,9 @@ const paymentController = {
         member.amountDue = 0;
         member.paymentStatus = 'paid';
         await member.save();
+        // The bill is settled, so the spin can no longer be undone and the
+        // member is free to play again next session.
+        activeDraws.delete(String(member._id));
         console.log(`✅ Member ${member.name} (${memberCode}) marked as PAID`);
       } else {
         // Partial payment - reduce the amount due
@@ -296,6 +547,92 @@ const paymentController = {
       });
     } catch (error) {
       console.error('Get transactions error:', error);
+      res.status(500).json({ message: 'Lỗi server' });
+    }
+  },
+
+  /**
+   * GET /api/payments/spin-history
+   * Lấy lịch sử quay trúng thưởng
+   */
+  getSpinHistory: async (req, res) => {
+    try {
+      const { page = 1, limit = 50, day, month, year, search, prizeId } = req.query;
+      const skip = (parseInt(page) - 1) * parseInt(limit);
+
+      // Trả về cả các lượt quay "Chúc bạn may mắn lần sau" (discount = 0)
+      let query = { status: 'applied' };
+
+      if (req.user && req.user.role === 'user') {
+        query.memberId = req.user.id;
+      }
+
+      if (year && month && day) {
+        const startDate = new Date(year, parseInt(month) - 1, parseInt(day));
+        const endDate = new Date(year, parseInt(month) - 1, parseInt(day), 23, 59, 59, 999);
+        query.createdAt = { $gte: startDate, $lte: endDate };
+      } else if (year && month) {
+        const startDate = new Date(year, parseInt(month) - 1, 1);
+        const endDate = new Date(year, parseInt(month), 0, 23, 59, 59, 999);
+        query.createdAt = { $gte: startDate, $lte: endDate };
+      } else if (year) {
+        const startDate = new Date(year, 0, 1);
+        const endDate = new Date(year, 11, 31, 23, 59, 59, 999);
+        query.createdAt = { $gte: startDate, $lte: endDate };
+      }
+
+      if (prizeId) {
+        query.prizeId = prizeId;
+      }
+
+      if (search) {
+        query.$or = [
+          { memberName: { $regex: search, $options: 'i' } },
+          { memberCode: { $regex: search, $options: 'i' } }
+        ];
+      }
+
+      const [history, total, allWins] = await Promise.all([
+        SpinHistory.find(query).sort({ createdAt: -1 }).skip(skip).limit(parseInt(limit)).populate('memberId', 'avatarUrl'),
+        SpinHistory.countDocuments(query),
+        SpinHistory.find(query).select('discount')
+      ]);
+
+      const totalDiscount = allWins.reduce((sum, h) => sum + h.discount, 0);
+
+      res.status(200).json({
+        success: true,
+        data: history,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          totalPages: Math.ceil(total / parseInt(limit))
+        },
+        summary: {
+          totalDiscount
+        }
+      });
+    } catch (error) {
+      console.error('Get spin history error:', error);
+      res.status(500).json({ message: 'Lỗi server' });
+    }
+  },
+
+  /**
+   * DELETE /api/payments/spin-history/:id
+   * Admin xoá lịch sử quay thưởng
+   */
+  deleteSpinHistory: async (req, res) => {
+    try {
+      if (!req.user || req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Không có quyền truy cập' });
+      }
+      const { id } = req.params;
+      await SpinHistory.findByIdAndDelete(id);
+      res.status(200).json({ success: true });
+    } catch (error) {
+      console.error('Delete spin history error:', error);
       res.status(500).json({ message: 'Lỗi server' });
     }
   }
