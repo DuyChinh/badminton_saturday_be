@@ -267,6 +267,28 @@ const memberController = {
       console.error('Delete member error:', error);
       res.status(500).json({ message: 'Lỗi server' });
     }
+  },
+
+  /**
+   * PUT /api/members/:id/reset-spins
+   * Admin - Reset lượt quay cho thành viên
+   */
+  resetSpins: async (req, res) => {
+    try {
+      const member = await Member.findById(req.params.id);
+      if (!member) {
+        return res.status(404).json({ message: 'Không tìm thấy thành viên' });
+      }
+
+      member.spinCount = 0;
+      member.lastSpinDate = null;
+      await member.save();
+
+      res.status(200).json({ success: true, data: member, message: 'Đã reset lượt quay thành công' });
+    } catch (error) {
+      console.error('Reset spins error:', error);
+      res.status(500).json({ message: 'Lỗi server' });
+    }
   }
 };
 

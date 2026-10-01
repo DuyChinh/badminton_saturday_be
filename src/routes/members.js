@@ -10,6 +10,7 @@ router.get('/:id', memberController.getById);
 // Admin routes (require authentication)
 router.post('/', authMiddleware, memberController.create);
 router.put('/bulk-update', authMiddleware, memberController.bulkUpdate);
+router.put('/:id/reset-spins', authMiddleware, memberController.resetSpins);
 router.put('/:id', authMiddleware, memberController.update);
 router.delete('/:id', authMiddleware, memberController.delete);
 
