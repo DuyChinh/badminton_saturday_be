@@ -19,12 +19,12 @@ const config = require('../config');
  * `odds: null` means "whatever probability is left over".
  */
 const LUCKY_PRIZES = [
-  { id: 'cash1', label: '10.000đ', short: '10K', kind: 'cash', value: 10000, odds: 1 / 100 },
-  { id: 'cash2', label: '2.000đ', short: '2K', kind: 'cash', value: 2000, odds: 1 / 15 },
-  { id: 'cash3', label: '15.000đ', short: '15K', kind: 'cash', value: 15000, odds: 1 / 200 },
-  { id: 'cash4', label: '4.000đ', short: '4K', kind: 'cash', value: 4000, odds: 1 / 40 },
-  { id: 'cash5', label: '5.000đ', short: '5K', kind: 'cash', value: 5000, odds: 1 / 50 },
-  { id: 'half', label: 'Giảm 50%', short: '50%', kind: 'percent', value: 50, odds: 1 / 100 },
+  { id: 'cash1', label: '10.000đ', short: '10K', kind: 'cash', value: 10000, odds: 0.01 }, // 1%
+  { id: 'cash2', label: '2.000đ', short: '2K', kind: 'cash', value: 2000, odds: 0.15 }, // 15%
+  { id: 'cash3', label: '15.000đ', short: '15K', kind: 'cash', value: 15000, odds: 0.005 }, // 0.5%
+  { id: 'cash4', label: '4.000đ', short: '4K', kind: 'cash', value: 4000, odds: 0.04 }, // 4%
+  { id: 'cash5', label: '5.000đ', short: '5K', kind: 'cash', value: 5000, odds: 0.03 }, // 3%
+  { id: 'half', label: 'Giảm 50%', short: '50%', kind: 'percent', value: 50, odds: 0.015 }, // 1.5%
   { id: 'none', label: 'Chúc bạn may mắn lần sau', short: 'Lần sau', kind: 'none', value: 0, odds: null }
 ];
 
