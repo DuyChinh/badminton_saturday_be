@@ -27,6 +27,11 @@ const SpinHistorySchema = new mongoose.Schema({
     required: true,
     default: 0
   },
+  gameType: {
+    type: String,
+    enum: ['wheel', 'cards', 'boxes'],
+    default: 'wheel'
+  },
   status: {
     type: String,
     enum: ['applied', 'cancelled'],

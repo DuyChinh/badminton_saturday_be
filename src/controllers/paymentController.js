@@ -1,6 +1,7 @@
 const Member = require('../models/Member');
 const Transaction = require('../models/Transaction');
 const SpinHistory = require('../models/SpinHistory');
+const GameSetting = require('../models/GameSetting');
 const config = require('../config');
 
 /**
@@ -124,6 +125,71 @@ const isSameWeek = (date1, date2) => {
   return getMonday(d1) === getMonday(d2);
 };
 
+const GAME_LIST = ['wheel', 'cards', 'boxes'];
+
+const GAME_CATALOG = {
+  wheel: {
+    id: 'wheel',
+    name: 'Vòng quay may mắn',
+    tagline: 'Quay vòng may mắn – Nhận ngay giảm giá',
+    actionText: 'Quay để thử vận may',
+    spinningText: 'Đang quay…',
+    bubbleText: 'Hãy tham gia vòng quay may mắn để test nhân phẩm, biết đâu gỡ lại được tiền cước! 🤪🏸'
+  },
+  cards: {
+    id: 'cards',
+    name: 'Lật thẻ bài may mắn',
+    tagline: 'Lật thẻ nhân phẩm – Thử vận may tuần này',
+    actionText: 'Lật thẻ thử vận may',
+    spinningText: 'Đang mở thẻ…',
+    bubbleText: 'Chọn 1 lá bài may mắn để test nhân phẩm, biết đâu gỡ lại được tiền cước! 🃏🏸'
+  },
+  boxes: {
+    id: 'boxes',
+    name: 'Hộp quà bí ẩn',
+    tagline: 'Mở hộp quà bí mật – Rinh quà bất ngờ',
+    actionText: 'Mở hộp thử vận may',
+    spinningText: 'Đang mở hộp…',
+    bubbleText: 'Mở 1 hộp quà may mắn để test nhân phẩm, biết đâu gỡ lại được tiền cước! 🎁🏸'
+  }
+};
+
+const getWeekNumber = (date = new Date()) => {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = d.getUTCDay() || 7;
+  d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+};
+
+const resolveActiveGame = async () => {
+  try {
+    let setting = await GameSetting.findOne();
+    if (!setting) {
+      setting = await GameSetting.create({ mode: 'auto', manualGame: 'wheel' });
+    }
+    const weekNo = getWeekNumber(new Date());
+    const autoGame = GAME_LIST[weekNo % 3];
+    const activeGame = setting.mode === 'manual' ? setting.manualGame : autoGame;
+    return {
+      mode: setting.mode,
+      manualGame: setting.manualGame,
+      activeGame,
+      weekNo,
+      gameInfo: GAME_CATALOG[activeGame] || GAME_CATALOG.wheel
+    };
+  } catch (err) {
+    console.error('resolveActiveGame error:', err);
+    return {
+      mode: 'auto',
+      manualGame: 'wheel',
+      activeGame: 'wheel',
+      weekNo: 1,
+      gameInfo: GAME_CATALOG.wheel
+    };
+  }
+};
+
 const paymentController = {
   /**
    * GET /api/payments/qr/:memberId
@@ -142,6 +208,7 @@ const paymentController = {
 
       const draw = activeDraws.get(String(member._id));
       const baseAmount = draw?.originalAmountDue || member.amountDue;
+      const gameData = await resolveActiveGame();
 
       res.status(200).json({
         success: true,
@@ -154,6 +221,10 @@ const paymentController = {
           },
           payment: buildPayment(member),
           lucky: {
+            gameType: gameData.activeGame,
+            gameInfo: gameData.gameInfo,
+            weekNo: gameData.weekNo,
+            mode: gameData.mode,
             prizes: publicPrizes(baseAmount),
             halfMaxAmount: HALF_MAX_AMOUNT,
             spun: Boolean(draw),
@@ -219,6 +290,7 @@ const paymentController = {
         });
       }
 
+      const gameData = await resolveActiveGame();
       const prize = drawPrize(originalAmountDue);
       const discount = discountFor(prize, originalAmountDue);
 
@@ -231,7 +303,8 @@ const paymentController = {
         memberCode: member.memberCode,
         prizeId: prize.id,
         prizeLabel: prize.label,
-        discount
+        discount,
+        gameType: gameData.activeGame
       });
 
       activeDraws.set(key, {
@@ -240,7 +313,8 @@ const paymentController = {
         originalAmountDue,
         discountedTo: member.amountDue,
         cancelled: false,
-        historyId: history._id
+        historyId: history._id,
+        gameType: gameData.activeGame
       });
 
       return res.status(200).json({
@@ -250,6 +324,7 @@ const paymentController = {
           prizeLabel: prize.label,
           discount,
           originalAmountDue,
+          gameType: gameData.activeGame,
           member: { id: member._id, amountDue: member.amountDue },
           payment: buildPayment(member)
         }
@@ -633,6 +708,73 @@ const paymentController = {
       res.status(200).json({ success: true });
     } catch (error) {
       console.error('Delete spin history error:', error);
+      res.status(500).json({ message: 'Lỗi server' });
+    }
+  },
+
+  /**
+   * GET /api/payments/game-setting
+   * Public/Admin - Lấy thông tin trò chơi hiện tại và cấu hình
+   */
+  getGameSetting: async (req, res) => {
+    try {
+      const gameData = await resolveActiveGame();
+      res.status(200).json({
+        success: true,
+        data: {
+          mode: gameData.mode,
+          manualGame: gameData.manualGame,
+          activeGame: gameData.activeGame,
+          weekNo: gameData.weekNo,
+          gameInfo: gameData.gameInfo,
+          games: Object.values(GAME_CATALOG)
+        }
+      });
+    } catch (error) {
+      console.error('Get game setting error:', error);
+      res.status(500).json({ message: 'Lỗi server' });
+    }
+  },
+
+  /**
+   * PUT /api/payments/game-setting
+   * Admin - Cập nhật chế độ xoay tua (auto/manual) và trò chơi thủ công
+   */
+  updateGameSetting: async (req, res) => {
+    try {
+      if (!req.user || req.user.role !== 'admin') {
+        return res.status(403).json({ message: 'Không có quyền truy cập' });
+      }
+      const { mode, manualGame } = req.body;
+      if (mode && !['auto', 'manual'].includes(mode)) {
+        return res.status(400).json({ message: 'Chế độ không hợp lệ (auto hoặc manual)' });
+      }
+      if (manualGame && !GAME_LIST.includes(manualGame)) {
+        return res.status(400).json({ message: 'Trò chơi không hợp lệ' });
+      }
+
+      let setting = await GameSetting.findOne();
+      if (!setting) {
+        setting = new GameSetting();
+      }
+      if (mode) setting.mode = mode;
+      if (manualGame) setting.manualGame = manualGame;
+      await setting.save();
+
+      const gameData = await resolveActiveGame();
+      res.status(200).json({
+        success: true,
+        data: {
+          mode: gameData.mode,
+          manualGame: gameData.manualGame,
+          activeGame: gameData.activeGame,
+          weekNo: gameData.weekNo,
+          gameInfo: gameData.gameInfo,
+          games: Object.values(GAME_CATALOG)
+        }
+      });
+    } catch (error) {
+      console.error('Update game setting error:', error);
       res.status(500).json({ message: 'Lỗi server' });
     }
   }

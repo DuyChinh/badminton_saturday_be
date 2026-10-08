@@ -1,12 +1,17 @@
 const express = require('express');
 const router = express.Router();
 const paymentController = require('../controllers/paymentController');
+const authMiddleware = require('../middleware/authMiddleware');
 const optionalAuth = require('../middleware/optionalAuthMiddleware');
 
 // Public - QR code info
 router.get('/qr/:memberId', paymentController.getQRInfo);
 
-// Public - Lucky wheel (draw happens server-side; applies to member.amountDue)
+// Game rotation & settings
+router.get('/game-setting', paymentController.getGameSetting);
+router.put('/game-setting', authMiddleware, paymentController.updateGameSetting);
+
+// Public - Lucky games (draw happens server-side; applies to member.amountDue)
 router.post('/lucky-spin/:memberId', paymentController.luckySpin);
 router.post('/lucky-cancel/:memberId', paymentController.luckyCancel);
 
