@@ -41,7 +41,7 @@ const memberController = {
    */
   create: async (req, res) => {
     try {
-      const { name, memberCode, amountDue, note, username, password } = req.body;
+      const { name, memberCode, amountDue, note, username, password, customSpinsPerWeek } = req.body;
 
       if (!name || !name.trim()) {
         return res.status(400).json({ message: 'Tên thành viên là bắt buộc' });
@@ -74,6 +74,9 @@ const memberController = {
       }
 
       const initialAmount = amountDue !== undefined ? Number(amountDue) : 0;
+      const initialCustomSpins = (customSpinsPerWeek !== undefined && customSpinsPerWeek !== null && customSpinsPerWeek !== '')
+        ? Math.max(1, Number(customSpinsPerWeek))
+        : null;
       
       const member = await Member.create({
         name: name.trim(),
@@ -82,7 +85,8 @@ const memberController = {
         paymentStatus: initialAmount > 0 ? 'unpaid' : 'paid',
         note: note || '',
         username: finalUsername,
-        password: hashedPw
+        password: hashedPw,
+        customSpinsPerWeek: initialCustomSpins
       });
 
       res.status(201).json({ success: true, data: member });
@@ -184,6 +188,12 @@ const memberController = {
       if (password) {
         const salt = await bcrypt.genSalt(10);
         member.password = await bcrypt.hash(password, salt);
+      }
+
+      // Handle customSpinsPerWeek update
+      if (isAdmin && req.body.customSpinsPerWeek !== undefined) {
+        const val = req.body.customSpinsPerWeek;
+        member.customSpinsPerWeek = (val === '' || val === null) ? null : Math.max(1, Number(val));
       }
 
       await member.save();
